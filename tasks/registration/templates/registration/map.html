@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>OpenLayers Map</title>
+
+  {% block head %}
+  {% load static %}
+  <link rel="stylesheet" href="https://cdn.rawgit.com/openlayers/openlayers.github.io/master/en/v5.3.0/css/ol.css" type="text/css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script>
+    window.jsPDF = window.jspdf.jsPDF;
+  </script>
+  {% endblock %}
+
+  <style>
+    #map {
+      width: 100%;
+      height: 500px;
+    }
+  </style>
+
+  <style>
+    #draw-toolbar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      background-color: white;
+      padding: 5px;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .draw-buttons {
+      margin-bottom: 5px;
+    }
+
+    .draw-buttons button {
+      margin-right: 5px;
+    }
+    .logout-link {
+      float: right;
+    }
+  </style>
+</head>
+
+<body>
+  {% block content %}
+  <nav>
+    {% if user.is_authenticated %}
+    <div class="user-info">{{ user.username }} | <a href="/logout/" class="logout-link">Logout</a></div>
+    {% endif %}
+  </nav>
+
+  <div id="map"></div>
+  <button onclick="downloadPDF()">Download PDF</button>
+
+  {% endblock %}
+
+  <script src="https://cdn.rawgit.com/openlayers/openlayers.github.io/master/en/v5.3.0/build/ol.js"></script>
+
+  
+  <script>
+    const baseMapLayer = new ol.layer.Tile({
+      source: new ol.source.OSM(),
+    });
+
+    const vectorSource = new ol.source.Vector({
+      url: '/static/geojson/data.geojson',
+      format: new ol.format.GeoJSON(),
+    });
+
+    const vectorLayer = new ol.layer.Vector({
+      source: vectorSource,
+    });
+    const map = new ol.Map({
+      target: 'map',
+      layers: [baseMapLayer, vectorLayer],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([0, 0]),
+        zoom: 2,
+      }),
+    });
+
+    const measureInteraction = new ol.interaction.Draw({
+      source: vectorLayer.getSource(),
+      type: 'LineString',
+    });
+
+    measureInteraction.on('drawend', (event) => {
+      const geometry = event.feature.getGeometry();
+      const length = ol.Sphere.getLength(geometry);
+      console.log(`Length: ${length.toFixed(2)} meters`);
+    });
+
+    map.addInteraction(measureInteraction);
+
+    const drawToolbar = document.createElement('div');
+    drawToolbar.id = 'draw-toolbar';
+    drawToolbar.innerHTML = `
+      <button onclick="toggleDrawInteraction('draw')">Draw</button>
+      <button onclick="toggleDrawInteraction('cancel')">Cancel</button>
+    `;
+    map.getViewport().appendChild(drawToolbar);
+
+    const drawInteraction = new ol.interaction.Draw({
+      source: vectorLayer.getSource(),
+      type: 'Polygon',
+    });
+
+    function toggleDrawInteraction(action) {
+      if (action === 'draw') {
+        map.addInteraction(drawInteraction);
+      } else if (action === 'cancel') {
+        map.removeInteraction(drawInteraction);
+      }
+    }
+
+    function downloadPDF() {
+      const element = document.getElementById('map');
+      html2canvas(element).then(function (canvas) {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF();
+        const pageSize = pdf.internal.pageSize;
+        const pdfWidth = pageSize.width;
+        const pdfHeight = pageSize.height;
+
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+
+        const center = map.getView().getCenter();
+        const lat = ol.proj.toLonLat(center)[1];
+        const lon = ol.proj.toLonLat(center)[0];
+        pdf.text(`Latitude: ${lat.toFixed(4)}`, 10, pdfHeight - 10);
+        pdf.text(`Longitude: ${lon.toFixed(4)}`, 10, pdfHeight - 20);
+
+        const resolution = map.getView().getResolution();
+        const projection = map.getView().getProjection();
+        const dpi = 96; 
+        const inchesPerMeter = 39.37;
+        const metersPerUnit = ol.proj.getPointResolution(projection, dpi, center);
+        const scale = resolution * metersPerUnit * inchesPerMeter;
+        pdf.text(`Scale: 1:${Math.round(scale)}`, pdfWidth - 70, pdfHeight - 10);
+
+        pdf.save('map.pdf');
+      });
+    }
+
+  </script>
+</body>
+</html>
